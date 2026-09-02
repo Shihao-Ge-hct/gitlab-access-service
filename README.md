@@ -4,6 +4,11 @@
 
 当前实现阶段：阶段 6，容器部署闭环。
 
+构建工具链固定为 Node 24 和 pnpm 10.34.5。容器以非 root 的官方 `node` 用户运行，
+确保 Docker Compose 的 file Secret 在保持严格权限时可以被 Service 读取。Dockerfile 默认使用
+`node:24-bookworm-slim`，并固定使用 pnpm 10.34.5，避免 Corepack 自动选择
+未来版本导致构建结果变化。
+
 本阶段只包含：
 
 - 阶段 0 的请求和响应类型；
@@ -66,6 +71,17 @@ compose.yaml
 .env.example
 docs/deployment.md
 ```
+
+如果部署服务器已经缓存了兼容项目 `engines.node >=20` 的其他 Node 基础镜像，
+可以通过 `NODE_IMAGE` 显式指定；默认部署不需要覆盖：
+
+```powershell
+docker build --build-arg NODE_IMAGE=node:20-slim --tag gitlab-access-service:local .
+```
+
+Compose 默认使用 `10.254.0.0/24` 的显式 Docker bridge network，避免服务器的
+自动地址池耗尽；如果该网段与服务器已有网络冲突，可在 `.env` 中覆盖
+`SERVICE_DOCKER_SUBNET` 和 `SERVICE_NETWORK_NAME`。
 
 不要把真实 Token、CA 或 JWT 私钥放入仓库。Compose 预期从以下本地文件读取 Secret：
 

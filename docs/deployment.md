@@ -23,11 +23,17 @@ GITLAB_PROJECT
 GITLAB_PIPELINE_REF
 AUTH_JWT_ISSUER
 AUTH_JWT_AUDIENCE
+SERVICE_NETWORK_NAME
+SERVICE_DOCKER_SUBNET
 ```
 
 `SERVICE_BIND_ADDRESS` 默认是 `127.0.0.1`，只允许本机访问。要让其他内网机器调用，
 应改成服务器的内网 IP，或者按公司网络策略使用 `0.0.0.0`，同时在服务器防火墙上只
 允许受信任的调用方访问 `SERVICE_PORT`。不要直接暴露到公网。
+
+Compose 使用独立的显式 Docker bridge network，默认网段为 `10.254.0.0/24`。
+如果该网段和服务器已有 Docker 或内网网段冲突，应在 `.env` 中修改
+`SERVICE_DOCKER_SUBNET`，并确保 `SERVICE_NETWORK_NAME` 唯一。
 
 ## 2. 准备 Docker Secrets
 
@@ -74,6 +80,23 @@ docker compose --env-file .env build
 docker compose --env-file .env up -d
 docker compose --env-file .env ps
 ```
+
+默认构建使用 Node 24 和 pnpm 10.34.5。Dockerfile 已经固定 pnpm 版本，不会因为
+Corepack 发布了新版本而改变构建结果。
+
+容器以非 root 的官方 `node` 用户运行。Compose 的本地 file Secret 即使保持
+宿主机 `600` 权限，也能被容器内的 Service 读取；不要为了绕过权限问题把
+Token 文件改成全局可读。
+
+如果服务器暂时无法拉取 Node 24，但已经缓存了满足项目 `engines.node >=20` 的
+`node:20-slim`，可以先用显式基础镜像完成验证：
+
+```powershell
+docker build --pull=false --build-arg NODE_IMAGE=node:20-slim --tag gitlab-access-service:local .
+```
+
+这只是部署环境兼容性验证；恢复正常的镜像拉取后，正式部署仍建议使用默认的
+Node 24 基础镜像。
 
 确认容器状态为 `healthy`。首次启动或镜像更新后，Service 需要先通过容器自身的
 `/health/live` 健康检查。

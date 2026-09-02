@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "${SERVICE_BIND_ADDRESS:-127.0.0.1}:${SERVICE_PORT:-8080}:8080"
+    networks:
+      - access-service
     environment:
       GITLAB_BASE_URL: "${GITLAB_BASE_URL:-https://gitlab.hc.com}"
       GITLAB_PROJECT: "${GITLAB_PROJECT:-infras/ai_infra/gitKrab}"
@@ -42,6 +44,14 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+
+networks:
+  access-service:
+    name: "${SERVICE_NETWORK_NAME:-gitlab-access-service-net}"
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "${SERVICE_DOCKER_SUBNET:-10.254.0.0/24}"
 
 secrets:
   gitlab-token:
