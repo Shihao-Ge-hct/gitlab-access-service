@@ -1,0 +1,115 @@
+import { readFileSync } from "node:fs";
+import { X509Certificate } from "node:crypto";
+
+export const DEFAULT_BASE_URL = "https://gitlab.hc.com";
+export const DEFAULT_PROJECT = "infras/ai_infra/gitKrab";
+export const DEFAULT_PORT = 8080;
+export const DEFAULT_TOKEN_FILE = "/run/secrets/gitlab-token";
+export const DEFAULT_CA_FILE = "/run/secrets/gitlab-ca.crt";
+
+export interface ServiceConfig {
+  baseUrl: URL;
+  project: string;
+  projectId: string;
+  port: number;
+  token: string;
+  caPem: Buffer;
+  caPath: string;
+}
+
+export class ConfigError extends Error {
+  readonly safeMessage: string;
+
+  constructor(safeMessage: string) {
+    super(safeMessage);
+    this.name = "ConfigError";
+    this.safeMessage = safeMessage;
+  }
+}
+
+export interface ConfigEnvironment {
+  GITLAB_BASE_URL?: string;
+  GITLAB_PROJECT?: string;
+  GITLAB_TOKEN_FILE?: string;
+  GITLAB_CA_FILE?: string;
+  SERVICE_PORT?: string;
+}
+
+function readRequiredFile(path: string, description: string): Buffer {
+  try {
+    const contents = readFileSync(path);
+    if (contents.length === 0) {
+      throw new ConfigError(`${description} file is empty.`);
+    }
+    return contents;
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      throw error;
+    }
+    throw new ConfigError(`Could not read ${description} file.`);
+  }
+}
+
+function parsePort(value: string | undefined): number {
+  const port = value === undefined ? DEFAULT_PORT : Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new ConfigError("SERVICE_PORT must be an integer between 1 and 65535.");
+  }
+  return port;
+}
+
+function parseBaseUrl(value: string | undefined): URL {
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(value || DEFAULT_BASE_URL);
+  } catch {
+    throw new ConfigError("GITLAB_BASE_URL must be a valid HTTPS URL.");
+  }
+  if (baseUrl.protocol !== "https:" || baseUrl.username || baseUrl.password) {
+    throw new ConfigError("GITLAB_BASE_URL must use HTTPS without embedded credentials.");
+  }
+  if (baseUrl.pathname !== "/" || baseUrl.search || baseUrl.hash) {
+    throw new ConfigError("GITLAB_BASE_URL must contain only the GitLab origin.");
+  }
+  return baseUrl;
+}
+
+function parseProject(value: string | undefined): string {
+  const project = (value || DEFAULT_PROJECT).trim();
+  if (!project || project.startsWith("/") || project.endsWith("/")) {
+    throw new ConfigError("GITLAB_PROJECT must be a non-empty project path.");
+  }
+  if (project.includes("\\") || project.includes("..") || /[\u0000-\u001f]/.test(project)) {
+    throw new ConfigError("GITLAB_PROJECT contains unsupported characters.");
+  }
+  return project;
+}
+
+export function loadConfig(
+  environment: ConfigEnvironment = process.env,
+): ServiceConfig {
+  const tokenPath = environment.GITLAB_TOKEN_FILE || DEFAULT_TOKEN_FILE;
+  const caPath = environment.GITLAB_CA_FILE || DEFAULT_CA_FILE;
+  const token = readRequiredFile(tokenPath, "GitLab token").toString("utf8").trim();
+  if (!token) {
+    throw new ConfigError("GitLab token file is empty.");
+  }
+
+  const caPem = readRequiredFile(caPath, "GitLab CA");
+  try {
+    new X509Certificate(caPem);
+  } catch {
+    throw new ConfigError("GitLab CA file is not a valid X.509 certificate.");
+  }
+
+  const project = parseProject(environment.GITLAB_PROJECT);
+  return {
+    baseUrl: parseBaseUrl(environment.GITLAB_BASE_URL),
+    project,
+    projectId: encodeURIComponent(project),
+    port: parsePort(environment.SERVICE_PORT),
+    token,
+    caPem,
+    caPath,
+  };
+}
