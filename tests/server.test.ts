@@ -4,7 +4,10 @@ import { request } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ServiceConfig } from "../src/config.js";
-import { createServiceServer } from "../src/server.js";
+import {
+  createServiceServer,
+  type GitLabApi,
+} from "../src/server.js";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -14,6 +17,7 @@ const config: ServiceConfig = {
   baseUrl: new URL("https://gitlab.example.test"),
   project: "group/project",
   projectId: "group%2Fproject",
+  pipelineRef: "main",
   port: 8080,
   token: "test-token",
   caPem: Buffer.from("test-ca"),
@@ -56,10 +60,60 @@ async function start(dependencies: Parameters<typeof createServiceServer>[0]) {
   return address.port;
 }
 
+function fakeClient(overrides: Partial<GitLabApi> = {}): GitLabApi {
+  const notImplemented = async () => {
+    throw new Error("not implemented in this test");
+  };
+  return {
+    checkAccess: async () => ({
+      gitlabReachable: true,
+      project: "group/project",
+      defaultBranch: "main",
+    }),
+    createPipeline: notImplemented,
+    getPipeline: notImplemented,
+    listPipelineJobs: notImplemented,
+    playJob: notImplemented,
+    getJobTrace: notImplemented,
+    getJobArtifacts: notImplemented,
+    ...overrides,
+  };
+}
+
 async function get(port: number, path: string, method = "GET") {
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
     const clientRequest = request(
       { host: "127.0.0.1", port, path, method },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () =>
+          resolve({
+            status: response.statusCode || 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }),
+        );
+      },
+    );
+    clientRequest.on("error", reject);
+    clientRequest.end();
+  });
+}
+
+async function getWithHeaders(
+  port: number,
+  path: string,
+  authorization: string,
+) {
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const clientRequest = request(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method: "GET",
+        headers: { authorization },
+      },
       (response) => {
         const chunks: Buffer[] = [];
         response.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -96,7 +150,13 @@ function createToken(permissions: string[]): string {
   return `${data}.${signer.sign(privateKey).toString("base64url")}`;
 }
 
-async function post(port: number, path: string, authorization?: string) {
+async function post(
+  port: number,
+  path: string,
+  authorization?: string,
+  body?: unknown,
+) {
+  const payload = body === undefined ? undefined : JSON.stringify(body);
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
     const clientRequest = request(
       {
@@ -118,6 +178,11 @@ async function post(port: number, path: string, authorization?: string) {
       },
     );
     clientRequest.on("error", reject);
+    if (payload) {
+      clientRequest.setHeader("Content-Type", "application/json");
+      clientRequest.setHeader("Content-Length", Buffer.byteLength(payload));
+      clientRequest.write(payload);
+    }
     clientRequest.end();
   });
 }
@@ -126,11 +191,11 @@ describe("health HTTP routes", () => {
   it("returns live without contacting GitLab", async () => {
     const port = await start({
       config,
-      gitlabClient: {
+      gitlabClient: fakeClient({
         checkAccess: async () => {
           throw new Error("should not be called");
         },
-      },
+      }),
     });
 
     await expect(get(port, "/health/live")).resolves.toEqual({
@@ -142,13 +207,13 @@ describe("health HTTP routes", () => {
   it("returns ready with the upstream access result", async () => {
     const port = await start({
       config,
-      gitlabClient: {
+      gitlabClient: fakeClient({
         checkAccess: async () => ({
           gitlabReachable: true,
           project: "group/project",
           defaultBranch: "main",
         }),
-      },
+      }),
     });
 
     const response = await get(port, "/health/ready");
@@ -179,11 +244,11 @@ describe("health HTTP routes", () => {
   it("returns not ready when GitLab access fails", async () => {
     const port = await start({
       config,
-      gitlabClient: {
+      gitlabClient: fakeClient({
         checkAccess: async () => {
           throw new Error("upstream unavailable");
         },
-      },
+      }),
     });
 
     const response = await get(port, "/health/ready");
@@ -209,11 +274,11 @@ describe("health HTTP routes", () => {
   it("rejects an unauthenticated access check", async () => {
     const port = await start({
       config,
-      gitlabClient: {
+      gitlabClient: fakeClient({
         checkAccess: async () => {
           throw new Error("should not be called");
         },
-      },
+      }),
     });
 
     const response = await post(port, "/v1/access/check");
@@ -227,11 +292,11 @@ describe("health HTTP routes", () => {
   it("rejects an authenticated caller without the required permission", async () => {
     const port = await start({
       config,
-      gitlabClient: {
+      gitlabClient: fakeClient({
         checkAccess: async () => {
           throw new Error("should not be called");
         },
-      },
+      }),
     });
 
     const response = await post(
@@ -249,13 +314,13 @@ describe("health HTTP routes", () => {
   it("allows an authorized caller to run the access check", async () => {
     const port = await start({
       config,
-      gitlabClient: {
+      gitlabClient: fakeClient({
         checkAccess: async () => ({
           gitlabReachable: true,
           project: "group/project",
           defaultBranch: "main",
         }),
-      },
+      }),
     });
 
     const response = await post(
@@ -269,5 +334,179 @@ describe("health HTTP routes", () => {
       project: "group/project",
       defaultBranch: "main",
     });
+  });
+
+  it("creates a pipeline after validating the request body", async () => {
+    let receivedRequest: unknown;
+    const port = await start({
+      config,
+      gitlabClient: fakeClient({
+        createPipeline: async (pipelineRequest) => {
+          receivedRequest = pipelineRequest;
+          return {
+            pipelineId: 42,
+            pipelineUrl: "https://gitlab.example.test/pipelines/42",
+            ref: pipelineRequest.ref,
+            mode: pipelineRequest.mode,
+            targetJobs: pipelineRequest.targetJobs,
+          };
+        },
+      }),
+    });
+
+    const response = await post(
+      port,
+      "/v1/pipelines",
+      `Bearer ${createToken(["pipeline.create"])}`,
+      { mode: "test", ref: "v0.3.0", suites: ["unit", "e2e"] },
+    );
+    expect(response.status).toBe(201);
+    expect(receivedRequest).toEqual({
+      mode: "test",
+      ref: "v0.3.0",
+      suites: ["unit", "e2e"],
+      targetJobs: ["test-unit-windows", "test-e2e-windows"],
+    });
+    expect(JSON.parse(response.body)).toEqual({
+      pipelineId: 42,
+      pipelineUrl: "https://gitlab.example.test/pipelines/42",
+      ref: "v0.3.0",
+      mode: "test",
+      targetJobs: ["test-unit-windows", "test-e2e-windows"],
+    });
+  });
+
+  it("rejects invalid pipeline JSON with a contract error", async () => {
+    const port = await start({
+      config,
+      gitlabClient: fakeClient(),
+    });
+
+    const response = await post(
+      port,
+      "/v1/pipelines",
+      `Bearer ${createToken(["pipeline.create"])}`,
+      { mode: "test", ref: "main", suites: ["unknown"] },
+    );
+    expect(response.status).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({
+      code: "INVALID_REQUEST",
+      message: "unknown test suite 'unknown'; expected rust, unit, or e2e.",
+    });
+  });
+
+  it("returns a sanitized pipeline and managed jobs", async () => {
+    const port = await start({
+      config,
+      gitlabClient: fakeClient({
+        getPipeline: async () => ({
+          id: 42,
+          status: "running",
+          ref: "main",
+          web_url: "https://gitlab.example.test/pipelines/42",
+          created_at: "2026-09-02T03:00:00Z",
+        }),
+        listPipelineJobs: async () => [
+          {
+            jobId: 10,
+            pipelineId: 42,
+            name: "test-unit-windows",
+            status: "running",
+          },
+        ],
+      }),
+    });
+
+    const pipeline = await getWithHeaders(
+      port,
+      "/v1/pipelines/42",
+      `Bearer ${createToken(["job.read"])}`,
+    );
+    expect(pipeline.status).toBe(200);
+    expect(JSON.parse(pipeline.body)).toEqual({
+      pipelineId: 42,
+      status: "running",
+      ref: "main",
+      pipelineUrl: "https://gitlab.example.test/pipelines/42",
+      createdAt: "2026-09-02T03:00:00Z",
+    });
+
+    const jobs = await getWithHeaders(
+      port,
+      "/v1/pipelines/42/jobs",
+      `Bearer ${createToken(["job.read"])}`,
+    );
+    expect(jobs.status).toBe(200);
+    expect(JSON.parse(jobs.body)).toEqual([
+      {
+        jobId: 10,
+        pipelineId: 42,
+        name: "test-unit-windows",
+        status: "running",
+      },
+    ]);
+  });
+
+  it("requires the matching permission for pipeline and job operations", async () => {
+    const port = await start({ config, gitlabClient: fakeClient() });
+
+    await expect(
+      get(port, "/v1/pipelines/42", "GET"),
+    ).resolves.toMatchObject({ status: 401 });
+    await expect(
+      getWithHeaders(
+        port,
+        "/v1/pipelines/42",
+        `Bearer ${createToken(["pipeline.create"])}`,
+      ),
+    ).resolves.toMatchObject({ status: 403 });
+    await expect(
+      post(port, "/v1/jobs/10/play", `Bearer ${createToken(["job.read"])}`),
+    ).resolves.toMatchObject({ status: 403 });
+  });
+
+  it("plays a job and serves redacted trace and binary artifacts", async () => {
+    const port = await start({
+      config,
+      gitlabClient: fakeClient({
+        playJob: async () => ({
+          jobId: 10,
+          pipelineId: 42,
+          name: "test-unit-windows",
+          status: "running",
+        }),
+        getJobTrace: async () => "PRIVATE-TOKEN: test-token\nresult: failed",
+        getJobArtifacts: async () => ({
+          statusCode: 200,
+          headers: { "content-type": "application/zip" },
+          body: Buffer.from("zip bytes", "utf8"),
+        }),
+      }),
+    });
+
+    const played = await post(
+      port,
+      "/v1/jobs/10/play",
+      `Bearer ${createToken(["job.play"])}`,
+    );
+    expect(played.status).toBe(200);
+    expect(JSON.parse(played.body).status).toBe("running");
+
+    const trace = await getWithHeaders(
+      port,
+      "/v1/jobs/10/trace",
+      `Bearer ${createToken(["job.trace.read"])}`,
+    );
+    expect(trace.status).toBe(200);
+    expect(trace.body).toContain("<redacted>");
+    expect(trace.body).not.toContain("test-token");
+
+    const artifacts = await getWithHeaders(
+      port,
+      "/v1/jobs/10/artifacts",
+      `Bearer ${createToken(["artifact.read"])}`,
+    );
+    expect(artifacts.status).toBe(200);
+    expect(artifacts.body).toBe("zip bytes");
   });
 });

@@ -3,6 +3,7 @@ import { createPublicKey, X509Certificate } from "node:crypto";
 
 export const DEFAULT_BASE_URL = "https://gitlab.hc.com";
 export const DEFAULT_PROJECT = "infras/ai_infra/gitKrab";
+export const DEFAULT_PIPELINE_REF = "main";
 export const DEFAULT_PORT = 8080;
 export const DEFAULT_TOKEN_FILE = "/run/secrets/gitlab-token";
 export const DEFAULT_CA_FILE = "/run/secrets/gitlab-ca.crt";
@@ -21,6 +22,7 @@ export interface ServiceConfig {
   baseUrl: URL;
   project: string;
   projectId: string;
+  pipelineRef: string;
   port: number;
   token: string;
   caPem: Buffer;
@@ -41,6 +43,7 @@ export class ConfigError extends Error {
 export interface ConfigEnvironment {
   GITLAB_BASE_URL?: string;
   GITLAB_PROJECT?: string;
+  GITLAB_PIPELINE_REF?: string;
   GITLAB_TOKEN_FILE?: string;
   GITLAB_CA_FILE?: string;
   SERVICE_PORT?: string;
@@ -146,10 +149,15 @@ export function loadConfig(
     environment.AUTH_JWT_AUDIENCE?.trim() || DEFAULT_AUTH_AUDIENCE;
 
   const project = parseProject(environment.GITLAB_PROJECT);
+  const pipelineRef = parseRequiredSetting(
+    environment.GITLAB_PIPELINE_REF || DEFAULT_PIPELINE_REF,
+    "GITLAB_PIPELINE_REF must be a non-empty ref.",
+  );
   return {
     baseUrl: parseBaseUrl(environment.GITLAB_BASE_URL),
     project,
     projectId: encodeURIComponent(project),
+    pipelineRef,
     port: parsePort(environment.SERVICE_PORT),
     token,
     caPem,

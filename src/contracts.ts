@@ -46,6 +46,7 @@ export type ServiceErrorCode =
   | "UPSTREAM_UNAUTHORIZED"
   | "UPSTREAM_FORBIDDEN"
   | "UPSTREAM_NOT_FOUND"
+  | "UPSTREAM_CONFLICT"
   | "UPSTREAM_RATE_LIMITED"
   | "UPSTREAM_UNAVAILABLE"
   | "UPSTREAM_INVALID_RESPONSE"
@@ -74,6 +75,16 @@ export interface PipelineResponse {
   ref: string;
   mode: PipelineMode;
   targetJobs: readonly string[];
+}
+
+export interface PipelineStatusResponse {
+  pipelineId: number;
+  status: string;
+  ref?: string;
+  pipelineUrl?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  finishedAt?: string;
 }
 
 export interface JobResponse {
@@ -195,6 +206,7 @@ export function mapUpstreamStatus(status: number): ServiceErrorCode | null {
   if (status === 401) return "UPSTREAM_UNAUTHORIZED";
   if (status === 403) return "UPSTREAM_FORBIDDEN";
   if (status === 404) return "UPSTREAM_NOT_FOUND";
+  if (status === 409) return "UPSTREAM_CONFLICT";
   if (status === 429) return "UPSTREAM_RATE_LIMITED";
   if (status >= 500 && status <= 599) return "UPSTREAM_UNAVAILABLE";
   return null;

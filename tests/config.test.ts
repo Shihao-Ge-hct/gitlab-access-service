@@ -53,6 +53,7 @@ describe("loadConfig", () => {
       ...environment(files),
       GITLAB_BASE_URL: "https://gitlab.example.test",
       GITLAB_PROJECT: "group/project",
+      GITLAB_PIPELINE_REF: "ci-config",
       SERVICE_PORT: "18080",
     });
 
@@ -60,6 +61,7 @@ describe("loadConfig", () => {
     expect(config.caPath).toBe(files.caPath);
     expect(config.project).toBe("group/project");
     expect(config.projectId).toBe("group%2Fproject");
+    expect(config.pipelineRef).toBe("ci-config");
     expect(config.port).toBe(18080);
     expect(config.baseUrl.origin).toBe("https://gitlab.example.test");
     expect(config.auth.issuer).toBe("https://sso.example.test");

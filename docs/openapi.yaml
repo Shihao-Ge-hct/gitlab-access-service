@@ -87,6 +87,10 @@ paths:
       responses:
         "200":
           description: Pipeline 状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineStatusResponse"
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
@@ -104,6 +108,12 @@ paths:
       responses:
         "200":
           description: Job 列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JobResponse"
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
@@ -121,6 +131,10 @@ paths:
       responses:
         "200":
           description: Job 已启动
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobResponse"
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
@@ -252,6 +266,58 @@ components:
           type: array
           items:
             type: string
+    PipelineStatusResponse:
+      type: object
+      required: [pipelineId, status]
+      properties:
+        pipelineId:
+          type: integer
+        status:
+          type: string
+        ref:
+          type: string
+        pipelineUrl:
+          type: string
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+    JobResponse:
+      type: object
+      required: [jobId, pipelineId, name, status]
+      properties:
+        jobId:
+          type: integer
+        pipelineId:
+          type: integer
+        name:
+          type: string
+          enum:
+            - build-windows
+            - test-rust-windows
+            - test-unit-windows
+            - test-e2e-windows
+        status:
+          type: string
+        webUrl:
+          type: string
+          format: uri
+        ref:
+          type: string
+        sourceCommit:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
     ErrorResponse:
       type: object
       required: [code, message]

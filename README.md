@@ -2,7 +2,7 @@
 
 这是一个无前端的 Docker Service，用于集中处理 GitLab 访问认证、调用方鉴权和受控的 Windows Pipeline 操作。
 
-当前实现阶段：阶段 2，调用方认证和业务权限。
+当前实现阶段：阶段 3，GitLab API Adapter。
 
 本阶段只包含：
 
@@ -18,12 +18,18 @@
 - RS256 Bearer Token 校验；
 - 调用方 issuer、audience、subject、有效期和权限校验；
 - `/v1/access/check` 的认证和权限保护。
+- 创建和查询受控 Pipeline；
+- 查询 Windows 测试和构建 Job；
+- 启动白名单中的 manual Job；
+- 读取 Job Trace；
+- 下载 Job Artifact；
+- 将 GitLab CI 配置 ref 与用户选择的 GitHub 源码 ref 分开处理。
 
 本阶段不包含：
 
-- Pipeline 创建和轮询；
-- manual Job 启动；
-- Trace 和 Artifact 下载。
+- Pipeline 轮询编排；
+- 调用方请求取消；
+- 远程脚本和 Skill 迁移。
 
 ## 本地验证
 
@@ -70,5 +76,9 @@ AUTH_JWT_ISSUER
 AUTH_JWT_AUDIENCE
 ```
 
+GitLab Pipeline 配置分支通过 `GITLAB_PIPELINE_REF` 指定，用户真正要构建或测试的 GitHub 版本通过请求中的 `ref` 指定。两者默认都可以是 `main`，但含义不同。
+
 本阶段只验证外部签发的 RS256 JWT，不实现登录页面、用户名密码或
-Token 签发。下一阶段将实现 GitLab API Adapter。
+Token 签发。
+
+下一阶段将实现远程测试和远程打包脚本到 Service API 的迁移。
