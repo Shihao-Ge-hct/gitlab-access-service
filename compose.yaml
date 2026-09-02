@@ -15,16 +15,12 @@ services:
       PIPELINE_TIMEOUT_MINUTES: "${PIPELINE_TIMEOUT_MINUTES:-120}"
       GITLAB_TOKEN_FILE: "/run/secrets/gitlab-token"
       GITLAB_CA_FILE: "/run/secrets/gitlab-ca.crt"
-      AUTH_JWT_PUBLIC_KEY_FILE: "/run/secrets/auth-jwt-public-key"
-      AUTH_JWT_ISSUER: "${AUTH_JWT_ISSUER:?AUTH_JWT_ISSUER must be set}"
-      AUTH_JWT_AUDIENCE: "${AUTH_JWT_AUDIENCE:-gitlab-access-service}"
+      AUTH_MODE: "${AUTH_MODE:-network-trust}"
       SERVICE_PORT: "8080"
     secrets:
       - gitlab-token
       - source: gitlab-ca
         target: gitlab-ca.crt
-      - source: auth-jwt-public-key
-        target: auth-jwt-public-key
     healthcheck:
       test:
         [
@@ -58,5 +54,3 @@ secrets:
     file: ./secrets/gitlab-token
   gitlab-ca:
     file: ./secrets/gitlab-ca.crt
-  auth-jwt-public-key:
-    file: ./secrets/auth-jwt-public-key.pem

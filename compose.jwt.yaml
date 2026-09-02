@@ -1,0 +1,14 @@
+services:
+  gitlab-access-service:
+    environment:
+      AUTH_MODE: "jwt"
+      AUTH_JWT_PUBLIC_KEY_FILE: "/run/secrets/auth-jwt-public-key"
+      AUTH_JWT_ISSUER: "${AUTH_JWT_ISSUER:?AUTH_JWT_ISSUER must be set for JWT mode}"
+      AUTH_JWT_AUDIENCE: "${AUTH_JWT_AUDIENCE:-gitlab-access-service}"
+    secrets:
+      - source: auth-jwt-public-key
+        target: auth-jwt-public-key
+
+secrets:
+  auth-jwt-public-key:
+    file: ./secrets/auth-jwt-public-key.pem
