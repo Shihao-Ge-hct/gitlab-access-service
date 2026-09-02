@@ -1,5 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
+import {
+  authenticateRequest,
+  requirePermission,
+} from "./auth.js";
 import type { AccessCheckResponse } from "./contracts.js";
 import { loadConfig, type ServiceConfig } from "./config.js";
 import { GitLabClient } from "./gitlab-client.js";
@@ -15,7 +19,7 @@ interface ServerDependencies {
 function writeJson(
   response: ServerResponse,
   statusCode: number,
-  payload: Record<string, unknown>,
+  payload: object,
 ): void {
   const body = JSON.stringify(payload);
   response.statusCode = statusCode;
@@ -57,6 +61,53 @@ export function createServiceServer(dependencies: ServerDependencies) {
             status: "ready",
             ...access,
           });
+        })
+        .catch(() => {
+          writeJson(response, 503, {
+            status: "not_ready",
+            code: "UPSTREAM_UNAVAILABLE",
+            message: "GitLab access is not ready.",
+          });
+        });
+      return;
+    }
+
+    if (request.url === "/v1/access/check" && request.method === "POST") {
+      if (!config || !gitlabClient || !config.auth) {
+        writeJson(response, 503, {
+          status: "not_ready",
+          code: "SERVICE_NOT_READY",
+          message: "GitLab access is not ready.",
+        });
+        return;
+      }
+
+      try {
+        const identity = authenticateRequest(request.headers, config.auth);
+        requirePermission(identity, "gitlab.access.check");
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          "status" in error &&
+          error.status === 403
+        ) {
+          writeJson(response, 403, {
+            code: "FORBIDDEN",
+            message: "You do not have permission to perform this operation.",
+          });
+          return;
+        }
+        writeJson(response, 401, {
+          code: "UNAUTHENTICATED",
+          message: "Authentication failed.",
+        });
+        return;
+      }
+
+      void gitlabClient
+        .checkAccess()
+        .then((access) => {
+          writeJson(response, 200, access);
         })
         .catch(() => {
           writeJson(response, 503, {

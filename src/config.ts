@@ -1,11 +1,21 @@
 import { readFileSync } from "node:fs";
-import { X509Certificate } from "node:crypto";
+import { createPublicKey, X509Certificate } from "node:crypto";
 
 export const DEFAULT_BASE_URL = "https://gitlab.hc.com";
 export const DEFAULT_PROJECT = "infras/ai_infra/gitKrab";
 export const DEFAULT_PORT = 8080;
 export const DEFAULT_TOKEN_FILE = "/run/secrets/gitlab-token";
 export const DEFAULT_CA_FILE = "/run/secrets/gitlab-ca.crt";
+export const DEFAULT_AUTH_PUBLIC_KEY_FILE =
+  "/run/secrets/auth-jwt-public-key.pem";
+export const DEFAULT_AUTH_AUDIENCE = "gitlab-access-service";
+
+export interface AuthConfig {
+  publicKeyPem: Buffer;
+  publicKeyPath: string;
+  issuer: string;
+  audience: string;
+}
 
 export interface ServiceConfig {
   baseUrl: URL;
@@ -15,6 +25,7 @@ export interface ServiceConfig {
   token: string;
   caPem: Buffer;
   caPath: string;
+  auth: AuthConfig;
 }
 
 export class ConfigError extends Error {
@@ -33,6 +44,9 @@ export interface ConfigEnvironment {
   GITLAB_TOKEN_FILE?: string;
   GITLAB_CA_FILE?: string;
   SERVICE_PORT?: string;
+  AUTH_JWT_PUBLIC_KEY_FILE?: string;
+  AUTH_JWT_ISSUER?: string;
+  AUTH_JWT_AUDIENCE?: string;
 }
 
 function readRequiredFile(path: string, description: string): Buffer {
@@ -85,11 +99,24 @@ function parseProject(value: string | undefined): string {
   return project;
 }
 
+function parseRequiredSetting(
+  value: string | undefined,
+  message: string,
+): string {
+  const normalized = value?.trim();
+  if (!normalized) {
+    throw new ConfigError(message);
+  }
+  return normalized;
+}
+
 export function loadConfig(
   environment: ConfigEnvironment = process.env,
 ): ServiceConfig {
   const tokenPath = environment.GITLAB_TOKEN_FILE || DEFAULT_TOKEN_FILE;
   const caPath = environment.GITLAB_CA_FILE || DEFAULT_CA_FILE;
+  const authPublicKeyPath =
+    environment.AUTH_JWT_PUBLIC_KEY_FILE || DEFAULT_AUTH_PUBLIC_KEY_FILE;
   const token = readRequiredFile(tokenPath, "GitLab token").toString("utf8").trim();
   if (!token) {
     throw new ConfigError("GitLab token file is empty.");
@@ -102,6 +129,22 @@ export function loadConfig(
     throw new ConfigError("GitLab CA file is not a valid X.509 certificate.");
   }
 
+  const authPublicKeyPem = readRequiredFile(
+    authPublicKeyPath,
+    "auth JWT public key",
+  );
+  try {
+    createPublicKey(authPublicKeyPem);
+  } catch {
+    throw new ConfigError("Auth JWT public key is not valid.");
+  }
+  const issuer = parseRequiredSetting(
+    environment.AUTH_JWT_ISSUER,
+    "AUTH_JWT_ISSUER is required.",
+  );
+  const audience =
+    environment.AUTH_JWT_AUDIENCE?.trim() || DEFAULT_AUTH_AUDIENCE;
+
   const project = parseProject(environment.GITLAB_PROJECT);
   return {
     baseUrl: parseBaseUrl(environment.GITLAB_BASE_URL),
@@ -111,5 +154,11 @@ export function loadConfig(
     token,
     caPem,
     caPath,
+    auth: {
+      publicKeyPem: authPublicKeyPem,
+      publicKeyPath: authPublicKeyPath,
+      issuer,
+      audience,
+    },
   };
 }

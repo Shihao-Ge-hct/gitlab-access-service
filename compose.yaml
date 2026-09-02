@@ -9,10 +9,14 @@ services:
       GITLAB_PROJECT: "infras/ai_infra/gitKrab"
       GITLAB_TOKEN_FILE: "/run/secrets/gitlab-token"
       GITLAB_CA_FILE: "/run/secrets/gitlab-ca"
+      AUTH_JWT_PUBLIC_KEY_FILE: "/run/secrets/auth-jwt-public-key"
+      AUTH_JWT_ISSUER: "https://sso.example.internal"
+      AUTH_JWT_AUDIENCE: "gitlab-access-service"
       SERVICE_PORT: "8080"
     secrets:
       - gitlab-token
       - gitlab-ca
+      - auth-jwt-public-key
     read_only: true
     tmpfs:
       - /tmp
@@ -26,3 +30,5 @@ secrets:
     file: ./secrets/gitlab-token
   gitlab-ca:
     file: ./secrets/gitlab-ca.crt
+  auth-jwt-public-key:
+    file: ./secrets/auth-jwt-public-key.pem

@@ -20,6 +20,12 @@ const config: ServiceConfig = {
   token: "secret-token",
   caPem: Buffer.from(rootCertificates[0], "utf8"),
   caPath: "/run/secrets/gitlab-ca.crt",
+  auth: {
+    publicKeyPem: Buffer.from("test-public-key"),
+    publicKeyPath: "/run/secrets/auth-jwt-public-key.pem",
+    issuer: "https://sso.example.test",
+    audience: "gitlab-access-service",
+  },
 };
 
 class FakeTransport implements GitLabTransport {

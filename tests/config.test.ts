@@ -1,4 +1,5 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { generateKeyPairSync } from "node:crypto";
 import { rootCertificates } from "node:tls";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,9 +15,27 @@ async function createConfigFiles(token = "test-token\n", ca = rootCertificates[0
   tempDirectories.push(directory);
   const tokenPath = join(directory, "gitlab-token");
   const caPath = join(directory, "gitlab-ca.crt");
+  const authPublicKeyPath = join(directory, "auth-jwt-public-key.pem");
+  const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   await writeFile(tokenPath, token, "utf8");
   await writeFile(caPath, ca, "utf8");
-  return { tokenPath, caPath };
+  await writeFile(
+    authPublicKeyPath,
+    publicKey.export({ type: "spki", format: "pem" }),
+    "utf8",
+  );
+  return { tokenPath, caPath, authPublicKeyPath };
+}
+
+function environment(
+  files: Awaited<ReturnType<typeof createConfigFiles>>,
+) {
+  return {
+    GITLAB_TOKEN_FILE: files.tokenPath,
+    GITLAB_CA_FILE: files.caPath,
+    AUTH_JWT_PUBLIC_KEY_FILE: files.authPublicKeyPath,
+    AUTH_JWT_ISSUER: "https://sso.example.test",
+  };
 }
 
 afterEach(async () => {
@@ -31,8 +50,7 @@ describe("loadConfig", () => {
   it("reads and validates Docker Secret files", async () => {
     const files = await createConfigFiles();
     const config = loadConfig({
-      GITLAB_TOKEN_FILE: files.tokenPath,
-      GITLAB_CA_FILE: files.caPath,
+      ...environment(files),
       GITLAB_BASE_URL: "https://gitlab.example.test",
       GITLAB_PROJECT: "group/project",
       SERVICE_PORT: "18080",
@@ -44,13 +62,18 @@ describe("loadConfig", () => {
     expect(config.projectId).toBe("group%2Fproject");
     expect(config.port).toBe(18080);
     expect(config.baseUrl.origin).toBe("https://gitlab.example.test");
+    expect(config.auth.issuer).toBe("https://sso.example.test");
+    expect(config.auth.audience).toBe("gitlab-access-service");
   });
 
   it("rejects a missing Secret without exposing its path", () => {
     expect(() =>
       loadConfig({
-        GITLAB_TOKEN_FILE: "C:\\private\\missing-token",
-        GITLAB_CA_FILE: "C:\\private\\missing-ca.crt",
+        ...environment({
+          tokenPath: "C:\\private\\missing-token",
+          caPath: "C:\\private\\missing-ca.crt",
+          authPublicKeyPath: "C:\\private\\missing-key.pem",
+        }),
       }),
     ).toThrow("Could not read GitLab token file.");
   });
@@ -69,8 +92,7 @@ describe("loadConfig", () => {
     const files = await createConfigFiles(" \n");
     expect(() =>
       loadConfig({
-        GITLAB_TOKEN_FILE: files.tokenPath,
-        GITLAB_CA_FILE: files.caPath,
+        ...environment(files),
       }),
     ).toThrow("GitLab token file is empty.");
   });
@@ -79,10 +101,29 @@ describe("loadConfig", () => {
     const files = await createConfigFiles("test-token\n", "not-a-certificate");
     expect(() =>
       loadConfig({
-        GITLAB_TOKEN_FILE: files.tokenPath,
-        GITLAB_CA_FILE: files.caPath,
+        ...environment(files),
       }),
     ).toThrow(ConfigError);
+  });
+
+  it("rejects an invalid auth JWT public key", async () => {
+    const files = await createConfigFiles();
+    await writeFile(files.authPublicKeyPath, "not-a-public-key", "utf8");
+    expect(() =>
+      loadConfig({
+        ...environment(files),
+      }),
+    ).toThrow("Auth JWT public key is not valid.");
+  });
+
+  it("requires the auth JWT issuer", async () => {
+    const files = await createConfigFiles();
+    expect(() =>
+      loadConfig({
+        ...environment(files),
+        AUTH_JWT_ISSUER: " ",
+      }),
+    ).toThrow("AUTH_JWT_ISSUER is required.");
   });
 
   it.each([
@@ -94,8 +135,7 @@ describe("loadConfig", () => {
     const files = await createConfigFiles();
     expect(() =>
       loadConfig({
-        GITLAB_TOKEN_FILE: files.tokenPath,
-        GITLAB_CA_FILE: files.caPath,
+        ...environment(files),
         GITLAB_BASE_URL: baseUrl,
       }),
     ).toThrow(ConfigError);
