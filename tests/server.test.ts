@@ -26,6 +26,7 @@ const config: ServiceConfig = {
   caPem: Buffer.from("test-ca"),
   caPath: "/run/secrets/gitlab-ca.crt",
   auth: {
+    mode: "jwt",
     publicKeyPem: Buffer.from(
       publicKey.export({ type: "spki", format: "pem" }),
     ),
@@ -33,6 +34,10 @@ const config: ServiceConfig = {
     issuer: "https://sso.example.test",
     audience: "gitlab-access-service",
   },
+};
+const networkTrustConfig: ServiceConfig = {
+  ...config,
+  auth: { mode: "network-trust" },
 };
 
 const servers: ReturnType<typeof createServiceServer>[] = [];
@@ -331,6 +336,21 @@ describe("health HTTP routes", () => {
       "/v1/access/check",
       `Bearer ${createToken(["gitlab.access.check"])}`,
     );
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({
+      gitlabReachable: true,
+      project: "group/project",
+      defaultBranch: "main",
+    });
+  });
+
+  it("allows an unauthenticated caller in network-trust mode", async () => {
+    const port = await start({
+      config: networkTrustConfig,
+      gitlabClient: fakeClient(),
+    });
+
+    const response = await post(port, "/v1/access/check");
     expect(response.status).toBe(200);
     expect(JSON.parse(response.body)).toEqual({
       gitlabReachable: true,

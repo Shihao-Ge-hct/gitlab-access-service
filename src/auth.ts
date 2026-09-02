@@ -28,6 +28,21 @@ export class AuthorizationError extends Error {
   }
 }
 
+const NETWORK_TRUST_PERMISSIONS = Object.freeze([
+  "gitlab.access.check",
+  "pipeline.create",
+  "job.read",
+  "job.play",
+  "job.trace.read",
+  "artifact.read",
+  "operation.cancel",
+]);
+
+export const NETWORK_TRUST_IDENTITY: CallerIdentity = Object.freeze({
+  subject: "network-trusted",
+  permissions: NETWORK_TRUST_PERMISSIONS,
+});
+
 interface JwtHeader {
   alg?: unknown;
 }
@@ -40,6 +55,13 @@ interface JwtClaims {
   nbf?: unknown;
   permissions?: unknown;
 }
+
+type JwtAuthConfig = AuthConfig & {
+  mode: "jwt";
+  publicKeyPem: Buffer;
+  issuer: string;
+  audience: string;
+};
 
 function decodeJsonPart<T>(part: string): T {
   try {
@@ -88,7 +110,7 @@ function parsePermissions(value: unknown): readonly string[] {
 
 function verifyClaims(
   claims: JwtClaims,
-  config: AuthConfig,
+  config: JwtAuthConfig,
   nowMs: number,
 ): CallerIdentity {
   const nowSeconds = Math.floor(nowMs / 1000);
@@ -123,6 +145,16 @@ export function verifyAccessToken(
   config: AuthConfig,
   nowMs = Date.now(),
 ): CallerIdentity {
+  if (
+    config.mode !== "jwt" ||
+    !config.publicKeyPem ||
+    !config.issuer ||
+    !config.audience
+  ) {
+    throw new AuthenticationError();
+  }
+  const jwtConfig = config as JwtAuthConfig;
+
   const parts = token.split(".");
   if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
     throw new AuthenticationError();
@@ -138,7 +170,7 @@ export function verifyAccessToken(
   verifier.update(`${parts[0]}.${parts[1]}`);
   verifier.end();
   try {
-    if (!verifier.verify(config.publicKeyPem, signature)) {
+    if (!verifier.verify(jwtConfig.publicKeyPem, signature)) {
       throw new AuthenticationError();
     }
   } catch {
@@ -147,7 +179,7 @@ export function verifyAccessToken(
 
   return verifyClaims(
     decodeJsonPart<JwtClaims>(parts[1]),
-    config,
+    jwtConfig,
     nowMs,
   );
 }
@@ -157,6 +189,10 @@ export function authenticateRequest(
   config: AuthConfig,
   nowMs = Date.now(),
 ): CallerIdentity {
+  if (config.mode === "network-trust") {
+    return NETWORK_TRUST_IDENTITY;
+  }
+
   const authorization = headers.authorization;
   if (typeof authorization !== "string") {
     throw new AuthenticationError();

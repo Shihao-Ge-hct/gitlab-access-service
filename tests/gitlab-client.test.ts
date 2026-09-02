@@ -24,6 +24,7 @@ const config: ServiceConfig = {
   caPem: Buffer.from(rootCertificates[0], "utf8"),
   caPath: "/run/secrets/gitlab-ca.crt",
   auth: {
+    mode: "jwt",
     publicKeyPem: Buffer.from("test-public-key"),
     publicKeyPath: "/run/secrets/auth-jwt-public-key.pem",
     issuer: "https://sso.example.test",

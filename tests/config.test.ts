@@ -33,6 +33,7 @@ function environment(
   return {
     GITLAB_TOKEN_FILE: files.tokenPath,
     GITLAB_CA_FILE: files.caPath,
+    AUTH_MODE: "jwt",
     AUTH_JWT_PUBLIC_KEY_FILE: files.authPublicKeyPath,
     AUTH_JWT_ISSUER: "https://sso.example.test",
   };
@@ -68,8 +69,30 @@ describe("loadConfig", () => {
     expect(config.timeoutMinutes).toBe(30);
     expect(config.port).toBe(18080);
     expect(config.baseUrl.origin).toBe("https://gitlab.example.test");
+    expect(config.auth.mode).toBe("jwt");
     expect(config.auth.issuer).toBe("https://sso.example.test");
     expect(config.auth.audience).toBe("gitlab-access-service");
+  });
+
+  it("defaults to network-trust without requiring JWT settings", async () => {
+    const files = await createConfigFiles();
+    const config = loadConfig({
+      GITLAB_TOKEN_FILE: files.tokenPath,
+      GITLAB_CA_FILE: files.caPath,
+    });
+
+    expect(config.auth).toEqual({ mode: "network-trust" });
+  });
+
+  it("rejects an unsupported auth mode", async () => {
+    const files = await createConfigFiles();
+    expect(() =>
+      loadConfig({
+        GITLAB_TOKEN_FILE: files.tokenPath,
+        GITLAB_CA_FILE: files.caPath,
+        AUTH_MODE: "none",
+      }),
+    ).toThrow("AUTH_MODE must be either network-trust or jwt.");
   });
 
   it("rejects a missing Secret without exposing its path", () => {

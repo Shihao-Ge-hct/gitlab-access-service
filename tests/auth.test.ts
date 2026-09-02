@@ -17,6 +17,7 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", {
 });
 
 const authConfig: AuthConfig = {
+  mode: "jwt",
   publicKeyPem: Buffer.from(
     publicKey.export({ type: "spki", format: "pem" }),
   ),

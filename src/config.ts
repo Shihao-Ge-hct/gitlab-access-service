@@ -12,12 +12,16 @@ export const DEFAULT_CA_FILE = "/run/secrets/gitlab-ca.crt";
 export const DEFAULT_AUTH_PUBLIC_KEY_FILE =
   "/run/secrets/auth-jwt-public-key.pem";
 export const DEFAULT_AUTH_AUDIENCE = "gitlab-access-service";
+export const DEFAULT_AUTH_MODE = "network-trust" as const;
+
+export type AuthMode = "network-trust" | "jwt";
 
 export interface AuthConfig {
-  publicKeyPem: Buffer;
-  publicKeyPath: string;
-  issuer: string;
-  audience: string;
+  mode: AuthMode;
+  publicKeyPem?: Buffer;
+  publicKeyPath?: string;
+  issuer?: string;
+  audience?: string;
 }
 
 export interface ServiceConfig {
@@ -53,6 +57,7 @@ export interface ConfigEnvironment {
   GITLAB_TOKEN_FILE?: string;
   GITLAB_CA_FILE?: string;
   SERVICE_PORT?: string;
+  AUTH_MODE?: string;
   AUTH_JWT_PUBLIC_KEY_FILE?: string;
   AUTH_JWT_ISSUER?: string;
   AUTH_JWT_AUDIENCE?: string;
@@ -131,13 +136,19 @@ function parseRequiredSetting(
   return normalized;
 }
 
+function parseAuthMode(value: string | undefined): AuthMode {
+  const mode = value?.trim() || DEFAULT_AUTH_MODE;
+  if (mode !== "network-trust" && mode !== "jwt") {
+    throw new ConfigError("AUTH_MODE must be either network-trust or jwt.");
+  }
+  return mode;
+}
+
 export function loadConfig(
   environment: ConfigEnvironment = process.env,
 ): ServiceConfig {
   const tokenPath = environment.GITLAB_TOKEN_FILE || DEFAULT_TOKEN_FILE;
   const caPath = environment.GITLAB_CA_FILE || DEFAULT_CA_FILE;
-  const authPublicKeyPath =
-    environment.AUTH_JWT_PUBLIC_KEY_FILE || DEFAULT_AUTH_PUBLIC_KEY_FILE;
   const token = readRequiredFile(tokenPath, "GitLab token").toString("utf8").trim();
   if (!token) {
     throw new ConfigError("GitLab token file is empty.");
@@ -150,21 +161,32 @@ export function loadConfig(
     throw new ConfigError("GitLab CA file is not a valid X.509 certificate.");
   }
 
-  const authPublicKeyPem = readRequiredFile(
-    authPublicKeyPath,
-    "auth JWT public key",
-  );
-  try {
-    createPublicKey(authPublicKeyPem);
-  } catch {
-    throw new ConfigError("Auth JWT public key is not valid.");
+  const authMode = parseAuthMode(environment.AUTH_MODE);
+  let auth: AuthConfig = { mode: authMode };
+  if (authMode === "jwt") {
+    const authPublicKeyPath =
+      environment.AUTH_JWT_PUBLIC_KEY_FILE || DEFAULT_AUTH_PUBLIC_KEY_FILE;
+    const authPublicKeyPem = readRequiredFile(
+      authPublicKeyPath,
+      "auth JWT public key",
+    );
+    try {
+      createPublicKey(authPublicKeyPem);
+    } catch {
+      throw new ConfigError("Auth JWT public key is not valid.");
+    }
+    auth = {
+      mode: authMode,
+      publicKeyPem: authPublicKeyPem,
+      publicKeyPath: authPublicKeyPath,
+      issuer: parseRequiredSetting(
+        environment.AUTH_JWT_ISSUER,
+        "AUTH_JWT_ISSUER is required.",
+      ),
+      audience:
+        environment.AUTH_JWT_AUDIENCE?.trim() || DEFAULT_AUTH_AUDIENCE,
+    };
   }
-  const issuer = parseRequiredSetting(
-    environment.AUTH_JWT_ISSUER,
-    "AUTH_JWT_ISSUER is required.",
-  );
-  const audience =
-    environment.AUTH_JWT_AUDIENCE?.trim() || DEFAULT_AUTH_AUDIENCE;
 
   const project = parseProject(environment.GITLAB_PROJECT);
   const pipelineRef = parseRequiredSetting(
@@ -190,11 +212,6 @@ export function loadConfig(
     token,
     caPem,
     caPath,
-    auth: {
-      publicKeyPem: authPublicKeyPem,
-      publicKeyPath: authPublicKeyPath,
-      issuer,
-      audience,
-    },
+    auth,
   };
 }
