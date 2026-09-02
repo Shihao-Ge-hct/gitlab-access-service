@@ -4,10 +4,11 @@ import { request } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ServiceConfig } from "../src/config.js";
+import type { GitLabApi } from "../src/gitlab-api.js";
 import {
   createServiceServer,
-  type GitLabApi,
 } from "../src/server.js";
+import { OperationCoordinator } from "../src/operation.js";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -18,6 +19,8 @@ const config: ServiceConfig = {
   project: "group/project",
   projectId: "group%2Fproject",
   pipelineRef: "main",
+  pollSeconds: 10,
+  timeoutMinutes: 120,
   port: 8080,
   token: "test-token",
   caPem: Buffer.from("test-ca"),
@@ -508,5 +511,121 @@ describe("health HTTP routes", () => {
     );
     expect(artifacts.status).toBe(200);
     expect(artifacts.body).toBe("zip bytes");
+  });
+
+  it("starts a controlled run and exposes its current state", async () => {
+    const client = fakeClient({
+      createPipeline: async (pipelineRequest) => ({
+        pipelineId: 42,
+        pipelineUrl: "https://gitlab.example.test/pipelines/42",
+        ref: pipelineRequest.ref,
+        mode: pipelineRequest.mode,
+        targetJobs: pipelineRequest.targetJobs,
+      }),
+      listPipelineJobs: async () => [
+        {
+          jobId: 10,
+          pipelineId: 42,
+          name: "build-windows",
+          status: "success",
+        },
+      ],
+    });
+    const operationCoordinator = new OperationCoordinator(client, {
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+      sleep: async () => {},
+    });
+    const port = await start({
+      config,
+      gitlabClient: client,
+      operationCoordinator,
+    });
+
+    const created = await post(
+      port,
+      "/v1/runs",
+      `Bearer ${createToken(["pipeline.create"])}`,
+      { mode: "build", ref: "v0.3.0" },
+    );
+    expect(created.status).toBe(202);
+    const createdOperation = JSON.parse(created.body);
+    expect(createdOperation).toMatchObject({
+      pipelineId: 42,
+      ref: "v0.3.0",
+      targetJobs: ["build-windows"],
+    });
+
+    const state = await getWithHeaders(
+      port,
+      `/v1/runs/${createdOperation.id}`,
+      `Bearer ${createToken(["job.read"])}`,
+    );
+    expect(state.status).toBe(200);
+    expect(JSON.parse(state.body)).toMatchObject({
+      id: createdOperation.id,
+      status: "success",
+    });
+  });
+
+  it("allows canceling Service monitoring for an active run", async () => {
+    let releaseList: (() => void) | undefined;
+    const pendingJobs = new Promise<never[]>((resolve) => {
+      releaseList = () => resolve([]);
+    });
+    const client = fakeClient({
+      createPipeline: async (pipelineRequest) => ({
+        pipelineId: 42,
+        pipelineUrl: "https://gitlab.example.test/pipelines/42",
+        ref: pipelineRequest.ref,
+        mode: pipelineRequest.mode,
+        targetJobs: pipelineRequest.targetJobs,
+      }),
+      listPipelineJobs: async () => pendingJobs,
+    });
+    const operationCoordinator = new OperationCoordinator(client, {
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    });
+    const port = await start({
+      config,
+      gitlabClient: client,
+      operationCoordinator,
+    });
+
+    const created = await post(
+      port,
+      "/v1/runs",
+      `Bearer ${createToken(["pipeline.create"])}`,
+      { mode: "build", ref: "main" },
+    );
+    const operationId = JSON.parse(created.body).id;
+    const canceled = await post(
+      port,
+      `/v1/runs/${operationId}/cancel`,
+      `Bearer ${createToken(["operation.cancel"])}`,
+    );
+    expect(canceled.status).toBe(202);
+    expect(JSON.parse(canceled.body).cancellationRequested).toBe(true);
+    releaseList?.();
+  });
+
+  it("rejects unknown run ids without contacting GitLab", async () => {
+    const port = await start({
+      config,
+      gitlabClient: fakeClient(),
+      operationCoordinator: new OperationCoordinator(fakeClient()),
+    });
+
+    const response = await getWithHeaders(
+      port,
+      "/v1/runs/missing",
+      `Bearer ${createToken(["job.read"])}`,
+    );
+    expect(response.status).toBe(404);
+    expect(JSON.parse(response.body)).toEqual({
+      code: "OPERATION_NOT_FOUND",
+      message: "Remote operation was not found.",
+    });
   });
 });

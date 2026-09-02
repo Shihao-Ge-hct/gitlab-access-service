@@ -120,6 +120,83 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /v1/runs:
+    post:
+      tags: [pipelines]
+      security:
+        - bearerAuth: []
+      summary: 创建并监控一个受控的 Windows 远程执行任务
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePipelineRequest"
+      responses:
+        "202":
+          description: 远程执行任务已创建并开始监控
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteOperation"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/UpstreamFailure"
+        "503":
+          $ref: "#/components/responses/UpstreamUnavailable"
+  /v1/runs/{operationId}:
+    get:
+      tags: [pipelines]
+      security:
+        - bearerAuth: []
+      summary: 查询远程执行任务状态
+      parameters:
+        - $ref: "#/components/parameters/OperationId"
+      responses:
+        "200":
+          description: 远程执行任务状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteOperation"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/runs/{operationId}/cancel:
+    post:
+      tags: [pipelines]
+      security:
+        - bearerAuth: []
+      summary: 停止 Service 对远程执行任务的监控
+      parameters:
+        - $ref: "#/components/parameters/OperationId"
+      responses:
+        "202":
+          description: 已请求停止 Service 侧监控
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteOperation"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: 任务已经结束
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /v1/jobs/{jobId}/play:
     post:
       tags: [jobs]
@@ -205,6 +282,13 @@ components:
       schema:
         type: integer
         minimum: 1
+    OperationId:
+      name: operationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   schemas:
     CreatePipelineRequest:
       oneOf:
@@ -318,6 +402,58 @@ components:
         finishedAt:
           type: string
           format: date-time
+    RemoteOperation:
+      type: object
+      required:
+        - id
+        - mode
+        - ref
+        - targetJobs
+        - pipelineId
+        - pipelineUrl
+        - status
+        - jobs
+        - cancellationRequested
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: [build, test]
+        ref:
+          type: string
+        targetJobs:
+          type: array
+          items:
+            type: string
+        pipelineId:
+          type: integer
+        pipelineUrl:
+          type: string
+          format: uri
+        status:
+          type: string
+          enum: [created, running, success, failed, canceled, timed_out]
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobResponse"
+        cancellationRequested:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        error:
+          type: string
     ErrorResponse:
       type: object
       required: [code, message]
@@ -357,6 +493,12 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     UpstreamUnavailable:
       description: GitLab 或 TLS 连接不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamFailure:
+      description: GitLab 返回了受控的上游错误
       content:
         application/json:
           schema:

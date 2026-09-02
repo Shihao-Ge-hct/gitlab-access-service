@@ -12,41 +12,28 @@ import {
   ContractError,
   mapUpstreamStatus,
   normalizeCreatePipelineRequest,
-  type AccessCheckResponse,
-  type JobResponse,
   type PipelineStatusResponse,
 } from "./contracts.js";
 import { loadConfig, type ServiceConfig } from "./config.js";
+import type { GitLabApi } from "./gitlab-api.js";
 import {
   GitLabClient,
   GitLabUpstreamError,
   type GitLabResponse,
 } from "./gitlab-client.js";
+import {
+  OperationConflictError,
+  OperationCoordinator,
+  OperationNotFoundError,
+} from "./operation.js";
 
 const MAX_JSON_BODY_BYTES = 16 * 1024;
-
-export interface GitLabApi {
-  checkAccess(): Promise<AccessCheckResponse>;
-  createPipeline(
-    request: ReturnType<typeof normalizeCreatePipelineRequest>,
-  ): Promise<{
-    pipelineId: number;
-    pipelineUrl: string;
-    ref: string;
-    mode: "build" | "test";
-    targetJobs: readonly string[];
-  }>;
-  getPipeline(pipelineId: number): Promise<Record<string, unknown>>;
-  listPipelineJobs(pipelineId: number): Promise<JobResponse[]>;
-  playJob(jobId: number): Promise<JobResponse>;
-  getJobTrace(jobId: number): Promise<string>;
-  getJobArtifacts(jobId: number): Promise<GitLabResponse>;
-}
 
 export interface ServerDependencies {
   config: ServiceConfig | null;
   configError?: string;
   gitlabClient?: GitLabApi | null;
+  operationCoordinator?: OperationCoordinator | null;
 }
 
 function writeJson(
@@ -205,6 +192,27 @@ function writeUpstreamFailure(
   });
 }
 
+function writeOperationFailure(
+  response: ServerResponse,
+  error: unknown,
+): void {
+  if (error instanceof OperationNotFoundError) {
+    writeJson(response, 404, {
+      code: error.code,
+      message: error.message,
+    });
+    return;
+  }
+  if (error instanceof OperationConflictError) {
+    writeJson(response, 409, {
+      code: error.code,
+      message: error.message,
+    });
+    return;
+  }
+  writeUpstreamFailure(response, error);
+}
+
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let total = 0;
@@ -282,6 +290,14 @@ export function createServiceServer(dependencies: ServerDependencies) {
   const gitlabClient =
     dependencies.gitlabClient ??
     (config ? new GitLabClient(config) : null);
+  const operationCoordinator =
+    dependencies.operationCoordinator ??
+    (config && gitlabClient
+      ? new OperationCoordinator(gitlabClient, {
+          pollIntervalMs: config.pollSeconds * 1000,
+          timeoutMs: config.timeoutMinutes * 60 * 1000,
+        })
+      : null);
 
   return createServer((request, response) => {
     const path = routePath(request);
@@ -355,6 +371,67 @@ export function createServiceServer(dependencies: ServerDependencies) {
           }
           writeUpstreamFailure(response, error);
         });
+      return;
+    }
+
+    if (path === "/v1/runs" && request.method === "POST") {
+      if (!authorizeRequest(request, response, config, "pipeline.create")) {
+        return;
+      }
+      if (!operationCoordinator) {
+        writeNotReady(response);
+        return;
+      }
+
+      void readJsonBody(request)
+        .then((body) => operationCoordinator.start(body))
+        .then((operation) => writeJson(response, 202, operation))
+        .catch((error) => {
+          if (error instanceof ContractError) {
+            writeJson(response, 400, {
+              code: "INVALID_REQUEST",
+              message: error.message,
+            });
+            return;
+          }
+          writeUpstreamFailure(response, error);
+        });
+      return;
+    }
+
+    const runCancelMatch = /^\/v1\/runs\/([^/]+)\/cancel$/.exec(path);
+    if (runCancelMatch && request.method === "POST") {
+      if (!authorizeRequest(request, response, config, "operation.cancel")) {
+        return;
+      }
+      if (!operationCoordinator) {
+        writeNotReady(response);
+        return;
+      }
+      try {
+        const operation = operationCoordinator.cancel(runCancelMatch[1]);
+        writeJson(response, 202, operation);
+      } catch (error) {
+        writeOperationFailure(response, error);
+      }
+      return;
+    }
+
+    const runMatch = /^\/v1\/runs\/([^/]+)$/.exec(path);
+    if (runMatch && request.method === "GET") {
+      if (!authorizeRequest(request, response, config, "job.read")) {
+        return;
+      }
+      if (!operationCoordinator) {
+        writeNotReady(response);
+        return;
+      }
+      try {
+        const operation = operationCoordinator.get(runMatch[1]);
+        writeJson(response, 200, operation);
+      } catch (error) {
+        writeOperationFailure(response, error);
+      }
       return;
     }
 

@@ -17,6 +17,8 @@ const config: ServiceConfig = {
   project: "group/project",
   projectId: "group%2Fproject",
   pipelineRef: "main",
+  pollSeconds: 10,
+  timeoutMinutes: 120,
   port: 8080,
   token: "secret-token",
   caPem: Buffer.from(rootCertificates[0], "utf8"),

@@ -2,7 +2,7 @@
 
 这是一个无前端的 Docker Service，用于集中处理 GitLab 访问认证、调用方鉴权和受控的 Windows Pipeline 操作。
 
-当前实现阶段：阶段 3，GitLab API Adapter。
+当前实现阶段：阶段 4，受控远程执行流程。
 
 本阶段只包含：
 
@@ -24,11 +24,13 @@
 - 读取 Job Trace；
 - 下载 Job Artifact；
 - 将 GitLab CI 配置 ref 与用户选择的 GitHub 源码 ref 分开处理。
+- 封装创建 Pipeline、启动 manual Job 和轮询最终状态的执行流程；
+- 提供远程执行任务的状态查询和取消监控接口；
+- 提供轮询间隔、执行超时和取消状态配置。
 
 本阶段不包含：
 
-- Pipeline 轮询编排；
-- 调用方请求取消；
+- GitLab 远程 Pipeline 的强制取消；
 - 远程脚本和 Skill 迁移。
 
 ## 本地验证
@@ -45,7 +47,7 @@ pnpm test
 docs/openapi.yaml
 ```
 
-## 阶段 1 本地验证
+## 阶段 4 本地验证
 
 ```powershell
 pnpm install
@@ -80,5 +82,18 @@ GitLab Pipeline 配置分支通过 `GITLAB_PIPELINE_REF` 指定，用户真正�
 
 本阶段只验证外部签发的 RS256 JWT，不实现登录页面、用户名密码或
 Token 签发。
+
+远程执行接口会在 Service 内部完成以下流程：
+
+```text
+创建 Pipeline
+    -> 等待目标 Job 出现
+    -> 启动 manual Job
+    -> 轮询所有目标 Job
+    -> 返回 success、failed、canceled 或 timed_out
+```
+
+取消操作只停止 Service 对该任务的继续监控，不会调用 GitLab 的 Pipeline
+取消接口，也不代表远程 Job 已经停止。
 
 下一阶段将实现远程测试和远程打包脚本到 Service API 的迁移。

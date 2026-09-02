@@ -4,6 +4,8 @@ import { createPublicKey, X509Certificate } from "node:crypto";
 export const DEFAULT_BASE_URL = "https://gitlab.hc.com";
 export const DEFAULT_PROJECT = "infras/ai_infra/gitKrab";
 export const DEFAULT_PIPELINE_REF = "main";
+export const DEFAULT_POLL_SECONDS = 10;
+export const DEFAULT_TIMEOUT_MINUTES = 120;
 export const DEFAULT_PORT = 8080;
 export const DEFAULT_TOKEN_FILE = "/run/secrets/gitlab-token";
 export const DEFAULT_CA_FILE = "/run/secrets/gitlab-ca.crt";
@@ -23,6 +25,8 @@ export interface ServiceConfig {
   project: string;
   projectId: string;
   pipelineRef: string;
+  pollSeconds: number;
+  timeoutMinutes: number;
   port: number;
   token: string;
   caPem: Buffer;
@@ -44,6 +48,8 @@ export interface ConfigEnvironment {
   GITLAB_BASE_URL?: string;
   GITLAB_PROJECT?: string;
   GITLAB_PIPELINE_REF?: string;
+  PIPELINE_POLL_SECONDS?: string;
+  PIPELINE_TIMEOUT_MINUTES?: string;
   GITLAB_TOKEN_FILE?: string;
   GITLAB_CA_FILE?: string;
   SERVICE_PORT?: string;
@@ -73,6 +79,18 @@ function parsePort(value: string | undefined): number {
     throw new ConfigError("SERVICE_PORT must be an integer between 1 and 65535.");
   }
   return port;
+}
+
+function parsePositiveNumber(
+  value: string | undefined,
+  defaultValue: number,
+  name: string,
+): number {
+  const parsed = value === undefined ? defaultValue : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new ConfigError(`${name} must be at least 1.`);
+  }
+  return parsed;
 }
 
 function parseBaseUrl(value: string | undefined): URL {
@@ -158,6 +176,16 @@ export function loadConfig(
     project,
     projectId: encodeURIComponent(project),
     pipelineRef,
+    pollSeconds: parsePositiveNumber(
+      environment.PIPELINE_POLL_SECONDS,
+      DEFAULT_POLL_SECONDS,
+      "PIPELINE_POLL_SECONDS",
+    ),
+    timeoutMinutes: parsePositiveNumber(
+      environment.PIPELINE_TIMEOUT_MINUTES,
+      DEFAULT_TIMEOUT_MINUTES,
+      "PIPELINE_TIMEOUT_MINUTES",
+    ),
     port: parsePort(environment.SERVICE_PORT),
     token,
     caPem,

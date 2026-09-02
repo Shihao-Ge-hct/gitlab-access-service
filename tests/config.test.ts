@@ -54,6 +54,8 @@ describe("loadConfig", () => {
       GITLAB_BASE_URL: "https://gitlab.example.test",
       GITLAB_PROJECT: "group/project",
       GITLAB_PIPELINE_REF: "ci-config",
+      PIPELINE_POLL_SECONDS: "5",
+      PIPELINE_TIMEOUT_MINUTES: "30",
       SERVICE_PORT: "18080",
     });
 
@@ -62,6 +64,8 @@ describe("loadConfig", () => {
     expect(config.project).toBe("group/project");
     expect(config.projectId).toBe("group%2Fproject");
     expect(config.pipelineRef).toBe("ci-config");
+    expect(config.pollSeconds).toBe(5);
+    expect(config.timeoutMinutes).toBe(30);
     expect(config.port).toBe(18080);
     expect(config.baseUrl.origin).toBe("https://gitlab.example.test");
     expect(config.auth.issuer).toBe("https://sso.example.test");

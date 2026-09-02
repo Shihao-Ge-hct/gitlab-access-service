@@ -8,6 +8,8 @@ services:
       GITLAB_BASE_URL: "https://gitlab.hc.com"
       GITLAB_PROJECT: "infras/ai_infra/gitKrab"
       GITLAB_PIPELINE_REF: "main"
+      PIPELINE_POLL_SECONDS: "10"
+      PIPELINE_TIMEOUT_MINUTES: "120"
       GITLAB_TOKEN_FILE: "/run/secrets/gitlab-token"
       GITLAB_CA_FILE: "/run/secrets/gitlab-ca"
       AUTH_JWT_PUBLIC_KEY_FILE: "/run/secrets/auth-jwt-public-key"
