@@ -5,6 +5,50 @@ Service 默认使用内网受信模式，也可以通过配置切换到 JWT 调�
 
 当前实现阶段：阶段 6，容器部署闭环。
 
+## 当前部署信息
+
+截至 2026 年 9 月 2 日，内网开发环境正在使用的 Access Service 部署在 Sim 服务器：
+
+```text
+服务器：sim@10.80.1.251
+Service 地址：http://10.80.1.251:18081
+```
+
+服务器上的 Service 主目录：
+
+```text
+/home/sim/gitlab-access-service
+```
+
+当前 release 目录：
+
+```text
+/home/sim/gitlab-access-service/releases/7b82ea4
+```
+
+服务器配置和敏感文件位置：
+
+```text
+配置文件：/home/sim/gitlab-access-service/.env
+Secrets：/home/sim/gitlab-access-service/secrets
+```
+
+当前 Docker Compose 项目名称为 `current`，容器名称为：
+
+```text
+current-gitlab-access-service-1
+```
+
+服务健康检查地址：
+
+```text
+http://10.80.1.251:18081/health/live
+http://10.80.1.251:18081/health/ready
+```
+
+当前部署使用 `network-trust` 模式。GitKrab 远程测试和远程打包脚本默认使用上述 Service
+地址，普通调用方不需要配置 GitLab Token、GitLab CA 或 JWT。
+
 构建工具链固定为 Node 24 和 pnpm 10.34.5。容器以非 root 的官方 `node` 用户运行，
 确保 Docker Compose 的 file Secret 在保持严格权限时可以被 Service 读取。Dockerfile 默认使用
 `node:24-bookworm-slim`，并固定使用 pnpm 10.34.5，避免 Corepack 自动选择
