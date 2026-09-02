@@ -3,8 +3,8 @@ info:
   title: GitLab Access Service
   version: 0.1.0
   description: |
-    无前端的 GitLab 访问服务。第一版只定义受控的认证、鉴权和
-    Windows Pipeline 操作契约，不暴露原始 GitLab API。
+    无前端的 GitLab 访问服务。默认使用内网受信调用，也支持可选的
+    Bearer JWT 鉴权。服务只暴露受控的 Windows Pipeline 操作，不暴露原始 GitLab API。
 servers:
   - url: http://localhost:8080
     description: 本地开发地址
@@ -35,6 +35,7 @@ paths:
       tags: [access]
       security:
         - bearerAuth: []
+        - {}
       summary: 检查 Service 到目标 GitLab 项目的访问能力
       responses:
         "200":
@@ -54,6 +55,7 @@ paths:
       tags: [pipelines]
       security:
         - bearerAuth: []
+        - {}
       summary: 创建受控的 Windows 测试或构建 Pipeline
       requestBody:
         required: true
@@ -81,6 +83,7 @@ paths:
       tags: [pipelines]
       security:
         - bearerAuth: []
+        - {}
       summary: 查询 Pipeline
       parameters:
         - $ref: "#/components/parameters/PipelineId"
@@ -102,6 +105,7 @@ paths:
       tags: [pipelines]
       security:
         - bearerAuth: []
+        - {}
       summary: 查询 Pipeline 下的受控 Job
       parameters:
         - $ref: "#/components/parameters/PipelineId"
@@ -125,6 +129,7 @@ paths:
       tags: [pipelines]
       security:
         - bearerAuth: []
+        - {}
       summary: 创建并监控一个受控的 Windows 远程执行任务
       requestBody:
         required: true
@@ -154,6 +159,7 @@ paths:
       tags: [pipelines]
       security:
         - bearerAuth: []
+        - {}
       summary: 查询远程执行任务状态
       parameters:
         - $ref: "#/components/parameters/OperationId"
@@ -175,6 +181,7 @@ paths:
       tags: [pipelines]
       security:
         - bearerAuth: []
+        - {}
       summary: 停止 Service 对远程执行任务的监控
       parameters:
         - $ref: "#/components/parameters/OperationId"
@@ -202,6 +209,7 @@ paths:
       tags: [jobs]
       security:
         - bearerAuth: []
+        - {}
       summary: 启动白名单中的 manual Job
       parameters:
         - $ref: "#/components/parameters/JobId"
@@ -223,6 +231,7 @@ paths:
       tags: [jobs]
       security:
         - bearerAuth: []
+        - {}
       summary: 读取 Job Trace
       parameters:
         - $ref: "#/components/parameters/JobId"
@@ -244,6 +253,7 @@ paths:
       tags: [jobs]
       security:
         - bearerAuth: []
+        - {}
       summary: 下载 Job Artifacts
       parameters:
         - $ref: "#/components/parameters/JobId"
@@ -267,6 +277,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: AUTH_MODE=jwt 时使用；network-trust 模式不要求此请求头。
   parameters:
     PipelineId:
       name: pipelineId

@@ -1,8 +1,8 @@
 # GitLab Access Service 部署
 
 本文说明如何用 Docker Compose 在一台内网服务器上启动无前端的 GitLab Access Service。
-Service 负责保存 GitLab Token、GitLab CA 和 JWT 公钥；调用方只需要访问 Service 并携带
-调用方 JWT。
+Service 集中保存 GitLab Token 和 GitLab CA，默认使用 `network-trust` 内网受信模式，
+因此调用方不需要配置 JWT、GitLab Token 或 GitLab CA。
 
 ## 1. 准备目录和配置
 
@@ -21,15 +21,20 @@ SERVICE_PORT
 GITLAB_BASE_URL
 GITLAB_PROJECT
 GITLAB_PIPELINE_REF
-AUTH_JWT_ISSUER
-AUTH_JWT_AUDIENCE
+AUTH_MODE
 SERVICE_NETWORK_NAME
 SERVICE_DOCKER_SUBNET
 ```
 
+默认配置为：
+
+```text
+AUTH_MODE=network-trust
+```
+
 `SERVICE_BIND_ADDRESS` 默认是 `127.0.0.1`，只允许本机访问。要让其他内网机器调用，
 应改成服务器的内网 IP，或者按公司网络策略使用 `0.0.0.0`，同时在服务器防火墙上只
-允许受信任的调用方访问 `SERVICE_PORT`。不要直接暴露到公网。
+允许公司内网或 VPN 网段访问 `SERVICE_PORT`。不要直接暴露到公网。
 
 Compose 使用独立的显式 Docker bridge network，默认网段为 `10.254.0.0/24`。
 如果该网段和服务器已有 Docker 或内网网段冲突，应在 `.env` 中修改
@@ -37,30 +42,18 @@ Compose 使用独立的显式 Docker bridge network，默认网段为 `10.254.0.
 
 ## 2. 准备 Docker Secrets
 
-把以下三个文件放入 `secrets/`：
+基础 `network-trust` 模式只需要以下两个文件：
 
 ```text
 secrets/gitlab-token
 secrets/gitlab-ca.crt
-secrets/auth-jwt-public-key.pem
 ```
 
 文件要求：
 
 - `gitlab-token` 只包含 Service 访问 GitLab 项目所需的 Token；
 - `gitlab-ca.crt` 是签发 GitLab HTTPS 证书的内部 CA 证书，必须是有效的 X.509 PEM；
-- `auth-jwt-public-key.pem` 是调用方 JWT 签名公钥，必须与调用方使用的 RS256 私钥匹配；
-- JWT 私钥只能保存在调用方的安全环境，不要复制到 Service 服务器或仓库；
-- 三个文件都不要提交到 Git，也不要写入 Dockerfile、`.env` 或日志。
-
-如果需要生成一组测试用的 RS256 密钥，可以在安全的密钥目录执行：
-
-```powershell
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out auth-jwt-private-key.pem
-openssl rsa -pubout -in auth-jwt-private-key.pem -out secrets/auth-jwt-public-key.pem
-```
-
-生产环境应使用公司统一的身份系统和密钥管理流程，不要把生成的测试私钥用于生产。
+- 两个文件都不要提交到 Git，也不要写入 Dockerfile、`.env` 或日志。
 
 ## 3. 校验 Compose 配置
 
@@ -70,10 +63,34 @@ openssl rsa -pubout -in auth-jwt-private-key.pem -out secrets/auth-jwt-public-ke
 docker compose --env-file .env config
 ```
 
-这个命令只校验 Compose 配置，不会启动容器。若提示 `AUTH_JWT_ISSUER must be set`，
-说明 `.env` 尚未配置完整。
+基础模式不需要 JWT issuer、audience 或公钥文件。
+
+如果需要启用 JWT 模式，准备：
+
+```text
+secrets/auth-jwt-public-key.pem
+```
+
+并配置：
+
+```text
+AUTH_JWT_ISSUER=https://sso.example.internal
+AUTH_JWT_AUDIENCE=gitlab-access-service
+```
+
+JWT 模式必须显式叠加 Compose 文件：
+
+```powershell
+docker compose `
+  --env-file .env `
+  -f compose.yaml `
+  -f compose.jwt.yaml `
+  config
+```
 
 ## 4. 构建并启动
+
+默认内网受信模式：
 
 ```powershell
 docker compose --env-file .env build
@@ -81,12 +98,25 @@ docker compose --env-file .env up -d
 docker compose --env-file .env ps
 ```
 
-默认构建使用 Node 24 和 pnpm 10.34.5。Dockerfile 已经固定 pnpm 版本，不会因为
-Corepack 发布了新版本而改变构建结果。
+JWT 模式：
 
-容器以非 root 的官方 `node` 用户运行。Compose 的本地 file Secret 即使保持
-宿主机 `600` 权限，也能被容器内的 Service 读取；不要为了绕过权限问题把
-Token 文件改成全局可读。
+```powershell
+docker compose `
+  --env-file .env `
+  -f compose.yaml `
+  -f compose.jwt.yaml `
+  build
+
+docker compose `
+  --env-file .env `
+  -f compose.yaml `
+  -f compose.jwt.yaml `
+  up -d
+```
+
+默认构建使用 Node 24 和 pnpm 10.34.5。容器以非 root 的官方 `node` 用户运行。
+Compose 的本地 file Secret 即使保持宿主机 `600` 权限，也能被容器内的 Service
+读取；不要为了绕过权限问题把 Token 文件改成全局可读。
 
 如果服务器暂时无法拉取 Node 24，但已经缓存了满足项目 `engines.node >=20` 的
 `node:20-slim`，可以先用显式基础镜像完成验证：
@@ -95,19 +125,13 @@ Token 文件改成全局可读。
 docker build --pull=false --build-arg NODE_IMAGE=node:20-slim --tag gitlab-access-service:local .
 ```
 
-这只是部署环境兼容性验证；恢复正常的镜像拉取后，正式部署仍建议使用默认的
-Node 24 基础镜像。
-
-确认容器状态为 `healthy`。首次启动或镜像更新后，Service 需要先通过容器自身的
-`/health/live` 健康检查。
-
-查看启动日志：
+确认容器状态为 `healthy`。查看启动日志：
 
 ```powershell
 docker compose --env-file .env logs --tail=100 gitlab-access-service
 ```
 
-## 5. 验收健康状态和 GitLab 访问
+## 5. 验收健康状态和远程调用
 
 检查进程存活：
 
@@ -121,30 +145,33 @@ Invoke-WebRequest "http://127.0.0.1:8080/health/live"
 Invoke-WebRequest "http://127.0.0.1:8080/health/ready"
 ```
 
-如果 `.env` 中把 `SERVICE_PORT` 改成了其他宿主机端口，将命令中的 `8080` 替换为该端口。
-`/health/live` 成功只表示 Node 进程正在运行；`/health/ready` 成功才表示 Service
-已经可以通过 CA 和 GitLab Token 访问目标项目。`/health/ready` 返回 `503` 时，应先
-检查 Secret 内容、CA 链、GitLab 地址、Token 权限和服务器网络。
-
-调用方 JWT 的权限链路可以通过 GitKrab 的 `check` 命令验证：
+调用方在 `network-trust` 模式下不需要配置任何 Token：
 
 ```powershell
+Set-Location D:\code\gitkrab
+$env:GITLAB_ACCESS_SERVICE_URL = "http://10.80.1.251:18081"
 node scripts/windows-remote-ci.mjs check
 ```
 
-GitKrab 客户端需要配置：
+然后可以执行：
+
+```powershell
+node scripts/windows-remote-ci.mjs test --only=unit --ref main
+node scripts/windows-remote-ci.mjs build --ref main
+```
+
+如果 Service 使用 JWT 模式，则客户端需要设置：
 
 ```text
-GITLAB_ACCESS_SERVICE_URL
 GITLAB_ACCESS_SERVICE_TOKEN
 ```
 
-这里的 Token 是调用方 JWT，不是 GitLab Token。GitLab Token 和 GitLab CA 不应出现在
-GitKrab 客户端环境、Skill、命令行参数或日志中。
+这里的 Token 是调用方 JWT，不是 GitLab Token。GitLab Token 和 GitLab CA 永远只保存在
+Service 服务器。
 
 ## 6. 停止、更新和回滚
 
-停止 Service：
+停止基础模式 Service：
 
 ```powershell
 docker compose --env-file .env down

@@ -1,6 +1,7 @@
 # GitLab Access Service
 
-这是一个无前端的 Docker Service，用于集中处理 GitLab 访问认证、调用方鉴权和受控的 Windows Pipeline 操作。
+这是一个无前端的 Docker Service，用于集中处理 GitLab 访问认证和受控的 Windows Pipeline 操作。
+Service 默认使用内网受信模式，也可以通过配置切换到 JWT 调用方鉴权模式。
 
 当前实现阶段：阶段 6，容器部署闭环。
 
@@ -20,9 +21,10 @@
 - GitLab HTTPS Client；
 - `/health/live` 和 `/health/ready`；
 - 配置、TLS 参数和健康检查测试。
-- RS256 Bearer Token 校验；
-- 调用方 issuer、audience、subject、有效期和权限校验；
-- `/v1/access/check` 的认证和权限保护。
+- `network-trust` 内网受信调用模式；
+- 可选的 RS256 Bearer Token 校验；
+- JWT issuer、audience、subject、有效期和权限校验；
+- `/v1/access/check` 及其他业务接口的鉴权和权限保护。
 - 创建和查询受控 Pipeline；
 - 查询 Windows 测试和构建 Job；
 - 启动白名单中的 manual Job；
@@ -37,7 +39,7 @@
 
 - GitLab 远程 Pipeline 的强制取消；
 - 生产环境的域名、反向代理和防火墙配置；
-- 真实 GitLab 凭据和真实调用方 JWT。
+- 真实生产身份系统和 JWT 签发。
 
 ## 本地验证
 
@@ -83,20 +85,22 @@ Compose 默认使用 `10.254.0.0/24` 的显式 Docker bridge network，避免服
 自动地址池耗尽；如果该网段与服务器已有网络冲突，可在 `.env` 中覆盖
 `SERVICE_DOCKER_SUBNET` 和 `SERVICE_NETWORK_NAME`。
 
-不要把真实 Token、CA 或 JWT 私钥放入仓库。Compose 预期从以下本地文件读取 Secret：
+不要把真实 Token、CA 或 JWT 私钥放入仓库。基础 Compose 只需要以下 Secret：
 
 ```text
 secrets/gitlab-token
 secrets/gitlab-ca.crt
-secrets/auth-jwt-public-key.pem
 ```
 
-复制 `.env.example` 为 `.env`，然后配置 JWT 的发行方和 audience：
+复制 `.env.example` 为 `.env`。默认使用内网受信模式：
 
 ```text
-AUTH_JWT_ISSUER
-AUTH_JWT_AUDIENCE
+AUTH_MODE=network-trust
 ```
+
+只有启用 JWT 模式时，才需要使用 `compose.jwt.yaml` 并配置
+`AUTH_JWT_ISSUER`、`AUTH_JWT_AUDIENCE` 和
+`secrets/auth-jwt-public-key.pem`。
 
 部署和验收命令见：
 
@@ -106,8 +110,9 @@ docs/deployment.md
 
 GitLab Pipeline 配置分支通过 `GITLAB_PIPELINE_REF` 指定，用户真正要构建或测试的 GitHub 版本通过请求中的 `ref` 指定。两者默认都可以是 `main`，但含义不同。
 
-本阶段只验证外部签发的 RS256 JWT，不实现登录页面、用户名密码或
-Token 签发。
+Service 支持内网受信调用和外部签发的 RS256 JWT，不实现登录页面、用户名密码或
+Token 签发。`network-trust` 模式的安全边界是服务器绑定地址、内网路由和防火墙；
+不要把该模式的端口暴露到公网。
 
 远程执行接口会在 Service 内部完成以下流程：
 
