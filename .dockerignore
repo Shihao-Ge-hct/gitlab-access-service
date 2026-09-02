@@ -1,9 +1,12 @@
 .git
+.gitignore
 node_modules
 dist
 coverage
 tests
 docs
+secrets
+*.log
 .env
 .env.*
-secrets
+!.env.example

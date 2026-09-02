@@ -2,7 +2,7 @@
 
 这是一个无前端的 Docker Service，用于集中处理 GitLab 访问认证、调用方鉴权和受控的 Windows Pipeline 操作。
 
-当前实现阶段：阶段 4，受控远程执行流程。
+当前实现阶段：阶段 6，容器部署闭环。
 
 本阶段只包含：
 
@@ -31,7 +31,8 @@
 本阶段不包含：
 
 - GitLab 远程 Pipeline 的强制取消；
-- 远程脚本和 Skill 迁移。
+- 生产环境的域名、反向代理和防火墙配置；
+- 真实 GitLab 凭据和真实调用方 JWT。
 
 ## 本地验证
 
@@ -47,7 +48,7 @@ pnpm test
 docs/openapi.yaml
 ```
 
-## 阶段 4 本地验证
+## 阶段 6 本地验证
 
 ```powershell
 pnpm install
@@ -61,9 +62,12 @@ pnpm build
 ```text
 Dockerfile
 compose.yaml
+.dockerignore
+.env.example
+docs/deployment.md
 ```
 
-不要把真实 Token 或 CA 放入仓库。Compose 预期从以下本地文件读取 Secret：
+不要把真实 Token、CA 或 JWT 私钥放入仓库。Compose 预期从以下本地文件读取 Secret：
 
 ```text
 secrets/gitlab-token
@@ -71,11 +75,17 @@ secrets/gitlab-ca.crt
 secrets/auth-jwt-public-key.pem
 ```
 
-Compose 还需要配置 JWT 的发行方和 audience：
+复制 `.env.example` 为 `.env`，然后配置 JWT 的发行方和 audience：
 
 ```text
 AUTH_JWT_ISSUER
 AUTH_JWT_AUDIENCE
+```
+
+部署和验收命令见：
+
+```text
+docs/deployment.md
 ```
 
 GitLab Pipeline 配置分支通过 `GITLAB_PIPELINE_REF` 指定，用户真正要构建或测试的 GitHub 版本通过请求中的 `ref` 指定。两者默认都可以是 `main`，但含义不同。
@@ -96,4 +106,4 @@ Token 签发。
 取消操作只停止 Service 对该任务的继续监控，不会调用 GitLab 的 Pipeline
 取消接口，也不代表远程 Job 已经停止。
 
-下一阶段将实现远程测试和远程打包脚本到 Service API 的迁移。
+远程测试和远程打包脚本已经在 GitKrab 仓库的 `windows-service` 分支迁移到本 Service API。

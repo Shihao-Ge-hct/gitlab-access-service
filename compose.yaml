@@ -2,24 +2,39 @@ services:
   gitlab-access-service:
     build:
       context: .
+    restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${SERVICE_BIND_ADDRESS:-127.0.0.1}:${SERVICE_PORT:-8080}:8080"
     environment:
-      GITLAB_BASE_URL: "https://gitlab.hc.com"
-      GITLAB_PROJECT: "infras/ai_infra/gitKrab"
-      GITLAB_PIPELINE_REF: "main"
-      PIPELINE_POLL_SECONDS: "10"
-      PIPELINE_TIMEOUT_MINUTES: "120"
+      GITLAB_BASE_URL: "${GITLAB_BASE_URL:-https://gitlab.hc.com}"
+      GITLAB_PROJECT: "${GITLAB_PROJECT:-infras/ai_infra/gitKrab}"
+      GITLAB_PIPELINE_REF: "${GITLAB_PIPELINE_REF:-main}"
+      PIPELINE_POLL_SECONDS: "${PIPELINE_POLL_SECONDS:-10}"
+      PIPELINE_TIMEOUT_MINUTES: "${PIPELINE_TIMEOUT_MINUTES:-120}"
       GITLAB_TOKEN_FILE: "/run/secrets/gitlab-token"
-      GITLAB_CA_FILE: "/run/secrets/gitlab-ca"
+      GITLAB_CA_FILE: "/run/secrets/gitlab-ca.crt"
       AUTH_JWT_PUBLIC_KEY_FILE: "/run/secrets/auth-jwt-public-key"
-      AUTH_JWT_ISSUER: "https://sso.example.internal"
-      AUTH_JWT_AUDIENCE: "gitlab-access-service"
+      AUTH_JWT_ISSUER: "${AUTH_JWT_ISSUER:?AUTH_JWT_ISSUER must be set}"
+      AUTH_JWT_AUDIENCE: "${AUTH_JWT_AUDIENCE:-gitlab-access-service}"
       SERVICE_PORT: "8080"
     secrets:
       - gitlab-token
-      - gitlab-ca
-      - auth-jwt-public-key
+      - source: gitlab-ca
+        target: gitlab-ca.crt
+      - source: auth-jwt-public-key
+        target: auth-jwt-public-key
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/health/live').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     read_only: true
     tmpfs:
       - /tmp
